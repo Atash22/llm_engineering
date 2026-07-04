@@ -1,8 +1,13 @@
 import sys
 import math
+from pathlib import Path
 from pydantic import BaseModel, Field
 from litellm import completion
 from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from evaluation.test import TestQuestion, load_tests
 from implementation.answer import answer_question, fetch_context
@@ -183,11 +188,13 @@ def evaluate_all_answers():
 def run_cli_evaluation(test_number: int):
     """Run evaluation for a specific test (async helper for CLI)."""
     # Load tests
-    tests = load_tests("tests.jsonl")
+    tests = load_tests()  # <- remove "tests.jsonl"
 
     if test_number < 0 or test_number >= len(tests):
         print(f"Error: test_row_number must be between 0 and {len(tests) - 1}")
         sys.exit(1)
+
+    # ... rest of the function stays the same ...
 
     # Get the test
     test = tests[test_number]
