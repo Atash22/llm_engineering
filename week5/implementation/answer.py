@@ -4,38 +4,64 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.messages import SystemMessage, HumanMessage, convert_to_messages
 from langchain_core.documents import Document
+from sentence_transformers import CrossEncoder
 
 from dotenv import load_dotenv
 
 
 load_dotenv(override=True)
 
-MODEL = "gpt-4.1-nano"
+MODEL = "gpt-4.1"
 DB_NAME = str(Path(__file__).parent.parent / "vector_db")
 
-# embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
 RETRIEVAL_K = 12
 
 SYSTEM_PROMPT = """
 You are a knowledgeable, friendly assistant representing the company Insurellm.
 You are chatting with a user about Insurellm.
-If relevant, use the given context to answer any question.
-If you don't know the answer, say so.
+
+Rules for your answer:
+1. Use ONLY the given context to answer. If the context does not contain the answer, say so directly.
+2. Include every fact from the context that is relevant to the question — full names, exact titles,
+   dates, and numbers must be copied exactly as written, never paraphrased, abbreviated, or shortened.
+3. Do not omit any detail present in the context that helps answer the question completely.
+4. Do not add information not found in the context, and do not add unrelated commentary or extra facts
+   beyond what was asked.
+5. Be direct and concise while still being complete.
+
 Context:
 {context}
 """
 
 vectorstore = Chroma(persist_directory=DB_NAME, embedding_function=embeddings)
-retriever = vectorstore.as_retriever()
 llm = ChatOpenAI(temperature=0, model_name=MODEL)
 
+_reranker = None
 
-def fetch_context(question: str) -> list[Document]:
+
+def get_reranker():
+    global _reranker
+    if _reranker is None:
+        _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    return _reranker
+
+
+def fetch_context(question: str, k: int = RETRIEVAL_K, fetch_k: int = 30) -> list[Document]:
     """
-    Retrieve relevant context documents for a question.
+    Retrieve relevant context documents for a question, re-ranked by a cross-encoder.
     """
-    return retriever.invoke(question, k=RETRIEVAL_K)
+    initial_docs = vectorstore.similarity_search(question, k=fetch_k)
+
+    if not initial_docs:
+        return []
+
+    reranker = get_reranker()
+    pairs = [[question, doc.page_content] for doc in initial_docs]
+    scores = reranker.predict(pairs)
+
+    ranked = sorted(zip(initial_docs, scores), key=lambda x: x[1], reverse=True)
+    return [doc for doc, _ in ranked[:k]]
 
 
 def combined_question(question: str, history: list[dict] = []) -> str:
