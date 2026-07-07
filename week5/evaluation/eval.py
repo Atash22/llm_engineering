@@ -1,3 +1,5 @@
+from implementation.answer import answer_question, fetch_context
+from evaluation.test import TestQuestion, load_tests
 import sys
 import math
 from pathlib import Path
@@ -9,9 +11,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from evaluation.test import TestQuestion, load_tests
-from implementation.answer import answer_question, fetch_context
-
 
 load_dotenv(override=True)
 
@@ -22,9 +21,12 @@ db_name = "vector_db"
 class RetrievalEval(BaseModel):
     """Evaluation metrics for retrieval performance."""
 
-    mrr: float = Field(description="Mean Reciprocal Rank - average across all keywords")
-    ndcg: float = Field(description="Normalized Discounted Cumulative Gain (binary relevance)")
-    keywords_found: int = Field(description="Number of keywords found in top-k results")
+    mrr: float = Field(
+        description="Mean Reciprocal Rank - average across all keywords")
+    ndcg: float = Field(
+        description="Normalized Discounted Cumulative Gain (binary relevance)")
+    keywords_found: int = Field(
+        description="Number of keywords found in top-k results")
     total_keywords: int = Field(description="Total number of keywords to find")
     keyword_coverage: float = Field(description="Percentage of keywords found")
 
@@ -97,17 +99,20 @@ def evaluate_retrieval(test: TestQuestion, k: int = 10) -> RetrievalEval:
     retrieved_docs = fetch_context(test.question)
 
     # Calculate MRR (average across all keywords)
-    mrr_scores = [calculate_mrr(keyword, retrieved_docs) for keyword in test.keywords]
+    mrr_scores = [calculate_mrr(keyword, retrieved_docs)
+                  for keyword in test.keywords]
     avg_mrr = sum(mrr_scores) / len(mrr_scores) if mrr_scores else 0.0
 
     # Calculate nDCG (average across all keywords)
-    ndcg_scores = [calculate_ndcg(keyword, retrieved_docs, k) for keyword in test.keywords]
+    ndcg_scores = [calculate_ndcg(keyword, retrieved_docs, k)
+                   for keyword in test.keywords]
     avg_ndcg = sum(ndcg_scores) / len(ndcg_scores) if ndcg_scores else 0.0
 
     # Calculate keyword coverage
     keywords_found = sum(1 for score in mrr_scores if score > 0)
     total_keywords = len(test.keywords)
-    keyword_coverage = (keywords_found / total_keywords * 100) if total_keywords > 0 else 0.0
+    keyword_coverage = (keywords_found / total_keywords *
+                        100) if total_keywords > 0 else 0.0
 
     return RetrievalEval(
         mrr=avg_mrr,
@@ -158,9 +163,11 @@ Provide detailed feedback and scores from 1 (very poor) to 5 (ideal) for each di
     ]
 
     # Call LLM judge with structured outputs (async)
-    judge_response = completion(model=MODEL, messages=judge_messages, response_format=AnswerEval)
+    judge_response = completion(
+        model=MODEL, messages=judge_messages, response_format=AnswerEval)
 
-    answer_eval = AnswerEval.model_validate_json(judge_response.choices[0].message.content)
+    answer_eval = AnswerEval.model_validate_json(
+        judge_response.choices[0].message.content)
 
     return answer_eval, generated_answer, retrieved_docs
 
@@ -217,7 +224,8 @@ def run_cli_evaluation(test_number: int):
 
     print(f"MRR: {retrieval_result.mrr:.4f}")
     print(f"nDCG: {retrieval_result.ndcg:.4f}")
-    print(f"Keywords Found: {retrieval_result.keywords_found}/{retrieval_result.total_keywords}")
+    print(
+        f"Keywords Found: {retrieval_result.keywords_found}/{retrieval_result.total_keywords}")
     print(f"Keyword Coverage: {retrieval_result.keyword_coverage:.1f}%")
 
     # Answer Evaluation
@@ -253,3 +261,34 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def judge_answer(test, generated_answer) -> AnswerEval:
+    """Judge a pre-generated answer against the reference (reusable for any RAG mode)."""
+    judge_messages = [
+        {
+            "role": "system",
+            "content": "You are an expert evaluator assessing the quality of answers. Evaluate the generated answer by comparing it to the reference answer. Only give 5/5 scores for perfect answers.",
+        },
+        {
+            "role": "user",
+            "content": f"""Question:
+{test.question}
+
+Generated Answer:
+{generated_answer}
+
+Reference Answer:
+{test.reference_answer}
+
+Please evaluate the generated answer on three dimensions:
+1. Accuracy: How factually correct is it compared to the reference answer?
+2. Completeness: How thoroughly does it address all aspects of the question?
+3. Relevance: How well does it directly answer the specific question asked?
+
+Provide detailed feedback and scores from 1 to 5 for each dimension.""",
+        },
+    ]
+    judge_response = completion(
+        model=MODEL, messages=judge_messages, response_format=AnswerEval)
+    return AnswerEval.model_validate_json(judge_response.choices[0].message.content)
